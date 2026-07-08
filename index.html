@@ -177,7 +177,16 @@
   .legend-toggle{ border:none; background:transparent; padding:2px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex:none; }
   .legend-toggle .dot{ width:9px; height:9px; border-radius:50%; background:var(--catcolor); }
   .legend-row.off .legend-toggle .dot{ opacity:0.3; }
-  .legend-color-input{ position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; border:none; padding:0; }
+  .legend-color-input{
+    -webkit-appearance:none; appearance:none;
+    width:13px; height:13px; flex:none;
+    border:1px solid var(--line-strong); border-radius:4px;
+    padding:0; background:none; cursor:pointer;
+  }
+  .legend-color-input::-webkit-color-swatch-wrapper{ padding:0; }
+  .legend-color-input::-webkit-color-swatch{ border:none; border-radius:3px; }
+  .legend-color-input::-moz-color-swatch{ border:none; border-radius:3px; }
+  .legend-color-input:hover{ border-color:var(--accent); }
   .legend-label{ flex:1; font-size:13px; color:var(--ink); outline:none; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .legend-label.editing{ background:var(--paper-raised); box-shadow:inset 0 0 0 1px var(--accent); border-radius:3px; padding:0 3px; white-space:normal; overflow:visible; }
   .legend-count{ font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); font-variant-numeric:tabular-nums; flex:none; }
@@ -692,10 +701,10 @@
       var on = state.activeCategories.has(c.key);
       var isRenaming = state.renamingKey === c.key;
       html += '<div class="legend-row' + (on ? '' : ' off') + '">' +
-        '<button class="legend-toggle catcolor" data-key="' + c.key + '" style="--cat-light:' + c.light + ';--cat-dark:' + c.dark + '" title="单击筛选 · 双击修改颜色">' +
+        '<button class="legend-toggle catcolor" data-key="' + c.key + '" style="--cat-light:' + c.light + ';--cat-dark:' + c.dark + '" title="筛选/取消筛选">' +
           '<span class="dot"></span>' +
         '</button>' +
-        '<input type="color" class="legend-color-input" data-key="' + c.key + '" value="' + c.light + '" tabindex="-1" aria-label="' + esc(c.label) + ' 颜色">' +
+        '<input type="color" class="legend-color-input" data-key="' + c.key + '" value="' + c.light + '" title="修改颜色" aria-label="' + esc(c.label) + ' 颜色">' +
         (isRenaming
           ? '<span class="legend-label editing" contenteditable="true" data-key="' + c.key + '">' + esc(c.label) + '</span>'
           : '<span class="legend-label" data-key="' + c.key + '" title="双击重命名">' + esc(c.label) + '</span>') +
@@ -1111,12 +1120,7 @@
   });
   el.legend.addEventListener('dblclick', function(e){
     var label = e.target.closest('.legend-label');
-    if (label){ state.renamingKey = label.dataset.key; renderLegend(); return; }
-    var toggle = e.target.closest('.legend-toggle');
-    if (toggle){
-      var colorInput = el.legend.querySelector('.legend-color-input[data-key="' + toggle.dataset.key + '"]');
-      if (colorInput) colorInput.click();
-    }
+    if (label){ state.renamingKey = label.dataset.key; renderLegend(); }
   });
   el.legend.addEventListener('change', function(e){
     var colorInput = e.target.closest('.legend-color-input');
