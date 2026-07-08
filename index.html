@@ -181,6 +181,13 @@
   .legend-label{ flex:1; font-size:13px; color:var(--ink); outline:none; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .legend-label.editing{ background:var(--paper-raised); box-shadow:inset 0 0 0 1px var(--accent); border-radius:3px; padding:0 3px; white-space:normal; overflow:visible; }
   .legend-count{ font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); font-variant-numeric:tabular-nums; flex:none; }
+  .legend-del{
+    display:none; border:none; background:transparent; color:var(--ink-faint);
+    width:16px; height:16px; border-radius:4px; font-size:12px; flex:none;
+    align-items:center; justify-content:center;
+  }
+  .legend-row:hover .legend-del{ display:flex; }
+  .legend-del:hover{ color:#B4453D; background:var(--paper-raised); }
 
   .legend-add{
     border:1px dashed var(--line-strong); background:transparent; color:var(--ink-faint);
@@ -344,6 +351,16 @@
   .qa-cats{ display:flex; flex-wrap:wrap; gap:4px; }
   .qa-cat{ width:16px; height:16px; border-radius:50%; border:2px solid transparent; background:var(--catcolor); padding:0; }
   .qa-cat.picked{ border-color:var(--ink); }
+  .qa-repeat{
+    flex:1; min-width:0; border:1px solid var(--line); border-radius:5px; font-size:11px;
+    padding:2px 4px; background:var(--paper); color:var(--ink);
+  }
+  .qa-weekdays{ display:flex; flex-wrap:wrap; gap:3px; }
+  .qa-wd{
+    width:21px; height:21px; border-radius:5px; border:1px solid var(--line);
+    background:var(--paper); font-size:10.5px; color:var(--ink-soft); padding:0;
+  }
+  .qa-wd.picked{ background:var(--accent); border-color:var(--accent); color:var(--accent-contrast); }
   .qa-actions{ display:flex; gap:6px; justify-content:flex-end; }
   .qa-actions button{ border:none; border-radius:5px; font-size:11px; padding:4px 9px; font-weight:600; }
   .qa-save{ background:var(--accent); color:var(--accent-contrast); }
@@ -472,8 +489,10 @@
 
   function pad2(n){ return (n < 10 ? '0' : '') + n; }
   function toISO(d){ return d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate()); }
+  function parseISO(s){ var p = s.split('-').map(Number); return new Date(p[0], p[1]-1, p[2]); }
   function addDays(d, n){ var r = new Date(d); r.setDate(r.getDate()+n); return r; }
   function sameDate(a,b){ return toISO(a) === toISO(b); }
+  function weekdayIndex(d){ return (d.getDay()+6) % 7; } // 0=Mon .. 6=Sun
   function clampToYear(d){
     if (d < MIN_DATE) return new Date(MIN_DATE);
     if (d > MAX_DATE) return new Date(MAX_DATE);
@@ -489,6 +508,17 @@
   function timeToMin(t){ var p = t.split(':').map(Number); return p[0]*60 + p[1]; }
   function minToTime(m){ m = Math.round(clamp(m, 0, 24*60)); return pad2(Math.floor(m/60)) + ':' + pad2(m%60); }
   function esc(s){ var div = document.createElement('div'); div.textContent = s; return div.innerHTML; }
+  function repeatDates(startDate, repeatMode, repeatDays){
+    var dates = [];
+    var d = new Date(startDate);
+    while (d <= MAX_DATE){
+      var wd = weekdayIndex(d);
+      var include = repeatMode === 'workday' ? wd <= 4 : repeatDays.has(wd);
+      if (include) dates.push(toISO(d));
+      d = addDays(d, 1);
+    }
+    return dates;
+  }
 
   var DOW_LABELS = ['一','二','三','四','五','六','日'];
 
@@ -627,6 +657,7 @@
           ? '<span class="legend-label editing" contenteditable="true" data-key="' + c.key + '">' + esc(c.label) + '</span>'
           : '<span class="legend-label" data-key="' + c.key + '" title="双击重命名">' + esc(c.label) + '</span>') +
         '<span class="legend-count">' + count + '</span>' +
+        '<button type="button" class="legend-del" data-key="' + c.key + '" title="删除分类">&times;</button>' +
       '</div>';
     });
     if (state.addingCategory){
@@ -726,7 +757,7 @@
     var dates = visibleDates();
     if (state.view === 'day'){
       var d = dates[0];
-      el.rangeLabel.textContent = (d.getMonth()+1) + '月' + d.getDate() + '日 星期' + DOW_LABELS[(d.getDay()+6)%7];
+      el.rangeLabel.textContent = (d.getMonth()+1) + '月' + d.getDate() + '日 星期' + DOW_LABELS[weekdayIndex(d)];
     } else {
       var start = dates[0], end = dates[6];
       var sameMonth = start.getMonth() === end.getMonth();
@@ -747,7 +778,7 @@
       var isToday = sameDate(d, TODAY);
       var holidayName = FEDERAL_HOLIDAYS[toISO(d)];
       html += '<div class="day-head' + (isToday ? ' today' : '') + (holidayName ? ' holiday' : '') + '"' + (holidayName ? ' title="' + esc(holidayName) + '"' : '') + '>' +
-        '<div class="dow">周' + DOW_LABELS[(d.getDay()+6)%7] + '</div>' +
+        '<div class="dow">周' + DOW_LABELS[weekdayIndex(d)] + '</div>' +
         '<div class="num">' + (d.getMonth()+1) + '/' + d.getDate() + '</div>' +
         (holidayName ? '<span class="holiday-name">' + esc(holidayName) + '</span>' : '') +
         '</div>';
@@ -859,11 +890,25 @@
       return '<button type="button" class="qa-cat catcolor' + (c.key === cat ? ' picked' : '') + '" ' +
         'data-cat="' + c.key + '" style="--cat-light:' + c.light + ';--cat-dark:' + c.dark + '" title="' + esc(c.label) + '"></button>';
     }).join('');
+    var repeat = qa.repeat || 'none';
+    var repeatDays = qa.repeatDays || new Set([weekdayIndex(parseISO(qa.date))]);
+    var weekdaysHtml = '';
+    if (repeat === 'custom'){
+      weekdaysHtml = '<div class="qa-row"><div class="qa-weekdays">' + DOW_LABELS.map(function(label, idx){
+        return '<button type="button" class="qa-wd' + (repeatDays.has(idx) ? ' picked' : '') + '" data-wd="' + idx + '">' + label + '</button>';
+      }).join('') + '</div></div>';
+    }
     return (
       '<form class="qa" data-role="quickadd" style="top:' + top + '%">' +
         '<input type="text" placeholder="任务标题…" value="' + esc(qa.draft || '') + '" autocomplete="off">' +
         '<div class="qa-row"><span class="qa-label">开始</span><input type="time" class="qa-start" value="' + qa.start + '"></div>' +
         '<div class="qa-row"><span class="qa-label">结束</span><input type="time" class="qa-end" value="' + qa.end + '"></div>' +
+        '<div class="qa-row"><span class="qa-label">重复</span><select class="qa-repeat">' +
+          '<option value="none"' + (repeat === 'none' ? ' selected' : '') + '>不重复</option>' +
+          '<option value="custom"' + (repeat === 'custom' ? ' selected' : '') + '>自定义星期</option>' +
+          '<option value="workday"' + (repeat === 'workday' ? ' selected' : '') + '>每个工作日</option>' +
+        '</select></div>' +
+        weekdaysHtml +
         '<div class="qa-row"><div class="qa-cats">' + cats + '</div></div>' +
         '<div class="qa-actions">' +
           '<button type="button" class="qa-cancel" data-role="cancel">取消</button>' +
@@ -916,6 +961,31 @@
     if (cat && trimmed) cat.label = trimmed;
     state.renamingKey = null;
     render();
+  }
+  function deleteCategory(key){
+    if (state.categories.length <= 1){
+      window.alert('至少需要保留一个分类');
+      return;
+    }
+    var cat = catByKey(key);
+    var count = state.tasks.filter(function(t){ return t.category === key; }).length;
+    var msg = count > 0
+      ? ('删除分类"' + cat.label + '"？其下 ' + count + ' 个任务也会被一并删除。')
+      : ('删除分类"' + cat.label + '"？');
+    if (!window.confirm(msg)) return;
+    state.categories = state.categories.filter(function(c){ return c.key !== key; });
+    state.tasks = state.tasks.filter(function(t){ return t.category !== key; });
+    state.activeCategories.delete(key);
+    render();
+  }
+  function captureQuickAddForm(){
+    if (!state.quickAdd) return;
+    var draftInput = el.grid.querySelector('.qa input[type="text"]');
+    var startInput = el.grid.querySelector('.qa-start');
+    var endInput = el.grid.querySelector('.qa-end');
+    if (draftInput) state.quickAdd.draft = draftInput.value;
+    if (startInput) state.quickAdd.start = startInput.value;
+    if (endInput) state.quickAdd.end = endInput.value;
   }
   function commitNotes(iso, text){
     var trimmed = text.replace(/\s+$/,'');
@@ -977,6 +1047,8 @@
 
   // ---------- event wiring: legend / categories ----------
   el.legend.addEventListener('click', function(e){
+    var delBtn = e.target.closest('.legend-del');
+    if (delBtn){ deleteCategory(delBtn.dataset.key); return; }
     var toggle = e.target.closest('.legend-toggle');
     if (toggle){
       var key = toggle.dataset.key;
@@ -1063,13 +1135,18 @@
     if (del){ deleteTask(del.dataset.id); return; }
     var qaCat = e.target.closest('.qa-cat');
     if (qaCat && state.quickAdd){
+      captureQuickAddForm();
       state.quickAdd.category = qaCat.dataset.cat;
-      var draftInput = el.grid.querySelector('.qa input[type="text"]');
-      var startInput = el.grid.querySelector('.qa-start');
-      var endInput = el.grid.querySelector('.qa-end');
-      if (draftInput) state.quickAdd.draft = draftInput.value;
-      if (startInput) state.quickAdd.start = startInput.value;
-      if (endInput) state.quickAdd.end = endInput.value;
+      render();
+      return;
+    }
+    var wdChip = e.target.closest('.qa-wd');
+    if (wdChip && state.quickAdd){
+      captureQuickAddForm();
+      if (!state.quickAdd.repeatDays) state.quickAdd.repeatDays = new Set([weekdayIndex(parseISO(state.quickAdd.date))]);
+      var wd = parseInt(wdChip.dataset.wd, 10);
+      if (state.quickAdd.repeatDays.has(wd)) state.quickAdd.repeatDays.delete(wd);
+      else state.quickAdd.repeatDays.add(wd);
       render();
       return;
     }
@@ -1098,6 +1175,18 @@
   el.grid.addEventListener('dblclick', function(e){
     var title = e.target.closest('.chip-title');
     if (title){ state.editingId = title.dataset.id; render(); }
+  });
+
+  el.grid.addEventListener('change', function(e){
+    var repeatSel = e.target.closest('.qa-repeat');
+    if (repeatSel && state.quickAdd){
+      captureQuickAddForm();
+      state.quickAdd.repeat = repeatSel.value;
+      if (repeatSel.value === 'custom' && !state.quickAdd.repeatDays){
+        state.quickAdd.repeatDays = new Set([weekdayIndex(parseISO(state.quickAdd.date))]);
+      }
+      render();
+    }
   });
 
   el.grid.addEventListener('keydown', function(e){
@@ -1129,7 +1218,14 @@
     var start = startInput.value || qa.start;
     var end = endInput.value || qa.end;
     if (timeToMin(end) <= timeToMin(start)) end = minToTime(timeToMin(start) + 15);
-    state.tasks.push(mk(title, qa.category || firstActiveCategory(), qa.date, start, end, 'planned'));
+    var category = qa.category || firstActiveCategory();
+    var dates = (qa.repeat === 'workday' || qa.repeat === 'custom')
+      ? repeatDates(parseISO(qa.date), qa.repeat, qa.repeatDays || new Set())
+      : [qa.date];
+    if (!dates.length) dates = [qa.date];
+    dates.forEach(function(d){
+      state.tasks.push(mk(title, category, d, start, end, 'planned'));
+    });
     state.quickAdd = null;
     render();
   });
