@@ -366,6 +366,28 @@
   .qa-save{ background:var(--accent); color:var(--accent-contrast); }
   .qa-cancel{ background:transparent; color:var(--ink-faint); }
 
+  /* delete-series confirm modal */
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(20,22,20,0.4);
+    display:flex; align-items:center; justify-content:center; z-index:50;
+  }
+  .modal-box{
+    background:var(--paper-raised); border-radius:12px; padding:18px;
+    width:min(300px, 86vw); box-shadow:var(--shadow);
+    display:flex; flex-direction:column; gap:14px;
+  }
+  .modal-title{ font-size:13.5px; color:var(--ink); line-height:1.5; }
+  .modal-actions{ display:flex; flex-direction:column; gap:7px; }
+  .modal-btn{
+    border:1px solid var(--line); background:var(--paper); color:var(--ink);
+    border-radius:7px; padding:9px 10px; font-size:13px; font-weight:600; text-align:center;
+  }
+  .modal-btn:hover{ border-color:var(--accent); color:var(--accent); }
+  .modal-btn.danger{ color:#B4453D; border-color:rgba(180,69,61,0.35); }
+  .modal-btn.danger:hover{ background:rgba(180,69,61,0.08); border-color:#B4453D; color:#B4453D; }
+  .modal-btn.ghost{ border-color:transparent; background:transparent; color:var(--ink-faint); }
+  .modal-btn.ghost:hover{ color:var(--ink); border-color:transparent; }
+
   @media (max-width: 760px){
     .app{ flex-direction:column; }
     .rail{
@@ -430,6 +452,8 @@
     </div>
   </main>
 </div>
+
+<div id="modalRoot"></div>
 
 <script>
 (function(){
@@ -576,7 +600,8 @@
     quickAdd: null,       // { date, start, end, draft, category }
     editingId: null,      // task id whose title is being edited
     renamingKey: null,    // category key being renamed
-    addingCategory: false
+    addingCategory: false,
+    deleteConfirm: null   // { id, seriesId, title } awaiting one-vs-all delete choice
   };
 
   function catByKey(key){
@@ -605,7 +630,8 @@
     nextBtn: document.getElementById('nextBtn'),
     rangeLabel: document.getElementById('rangeLabel'),
     addBtn: document.getElementById('addBtn'),
-    grid: document.getElementById('grid')
+    grid: document.getElementById('grid'),
+    modalRoot: document.getElementById('modalRoot')
   };
 
   function visibleDates(){
@@ -633,7 +659,24 @@
     renderAgenda();
     renderHeader();
     renderGrid();
+    renderModal();
     saveState();
+  }
+
+  function renderModal(){
+    if (!state.deleteConfirm){ el.modalRoot.innerHTML = ''; return; }
+    var dc = state.deleteConfirm;
+    el.modalRoot.innerHTML =
+      '<div class="modal-overlay" data-role="modal-overlay">' +
+        '<div class="modal-box">' +
+          '<div class="modal-title">"' + esc(dc.title) + '" 是重复任务，要删除哪些？</div>' +
+          '<div class="modal-actions">' +
+            '<button type="button" class="modal-btn" data-role="del-one">仅删除这一次</button>' +
+            '<button type="button" class="modal-btn danger" data-role="del-series">删除全部重复安排</button>' +
+            '<button type="button" class="modal-btn ghost" data-role="del-cancel">取消</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
   }
 
   function renderSeg(){
@@ -937,6 +980,10 @@
     state.tasks = state.tasks.filter(function(x){ return x.id !== id; });
     render();
   }
+  function deleteSeries(seriesId){
+    state.tasks = state.tasks.filter(function(x){ return x.seriesId !== seriesId; });
+    render();
+  }
   function moveTask(id, newDate, newStartMin){
     var t = state.tasks.find(function(x){ return x.id === id; });
     if (!t) return;
@@ -1132,7 +1179,16 @@
     var dup = e.target.closest('.chip-dup');
     if (dup){ duplicateTask(dup.dataset.id); return; }
     var del = e.target.closest('.chip-del');
-    if (del){ deleteTask(del.dataset.id); return; }
+    if (del){
+      var delTask = state.tasks.find(function(x){ return x.id === del.dataset.id; });
+      if (delTask && delTask.seriesId){
+        state.deleteConfirm = { id: delTask.id, seriesId: delTask.seriesId, title: delTask.title };
+        render();
+      } else {
+        deleteTask(del.dataset.id);
+      }
+      return;
+    }
     var qaCat = e.target.closest('.qa-cat');
     if (qaCat && state.quickAdd){
       captureQuickAddForm();
@@ -1219,12 +1275,16 @@
     var end = endInput.value || qa.end;
     if (timeToMin(end) <= timeToMin(start)) end = minToTime(timeToMin(start) + 15);
     var category = qa.category || firstActiveCategory();
-    var dates = (qa.repeat === 'workday' || qa.repeat === 'custom')
+    var isRepeating = qa.repeat === 'workday' || qa.repeat === 'custom';
+    var dates = isRepeating
       ? repeatDates(parseISO(qa.date), qa.repeat, qa.repeatDays || new Set())
       : [qa.date];
     if (!dates.length) dates = [qa.date];
+    var seriesId = isRepeating ? uid() : null;
     dates.forEach(function(d){
-      state.tasks.push(mk(title, category, d, start, end, 'planned'));
+      var t = mk(title, category, d, start, end, 'planned');
+      if (seriesId) t.seriesId = seriesId;
+      state.tasks.push(t);
     });
     state.quickAdd = null;
     render();
@@ -1304,6 +1364,20 @@
     resizeState = null;
     render();
   }
+
+  // ---------- delete-series confirm modal ----------
+  el.modalRoot.addEventListener('click', function(e){
+    if (!state.deleteConfirm) return;
+    var dc = state.deleteConfirm;
+    if (e.target.closest('[data-role="del-one"]')){ state.deleteConfirm = null; deleteTask(dc.id); return; }
+    if (e.target.closest('[data-role="del-series"]')){ state.deleteConfirm = null; deleteSeries(dc.seriesId); return; }
+    if (e.target.closest('[data-role="del-cancel"]') || e.target.classList.contains('modal-overlay')){
+      state.deleteConfirm = null; render(); return;
+    }
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && state.deleteConfirm){ state.deleteConfirm = null; render(); }
+  });
 
   render();
 })();
