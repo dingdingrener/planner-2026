@@ -1397,7 +1397,7 @@
       var rect = col.getBoundingClientRect();
       var y = e.clientY - rect.top;
       var minutes = HOUR_START*60 + (y / rect.height * TIMELINE_MINUTES);
-      minutes = Math.round(minutes / SNAP_MIN) * SNAP_MIN;
+      minutes = Math.round(minutes / 60) * 60; // default to the nearest whole hour
       var startMin = clamp(minutes, HOUR_START*60, HOUR_END*60 - 60);
       var endMin = Math.min(startMin + 60, HOUR_END*60);
       state.quickAdd = { date: col.dataset.date, start: minToTime(startMin), end: minToTime(endMin), draft: '', category: firstActiveCategory() };
