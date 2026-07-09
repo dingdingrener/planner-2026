@@ -318,8 +318,7 @@
 
   .chip-body{ min-width:0; flex:1; }
   .chip-time{ font-family:var(--font-mono); font-size:9.5px; color:var(--ink-faint); font-variant-numeric:tabular-nums; display:block; margin-bottom:1px; }
-  .chip-title{ color:var(--ink); word-break:break-word; outline:none; user-select:text; }
-  .chip-title.editing{ background:var(--paper-raised); border-radius:3px; box-shadow:inset 0 0 0 1px var(--accent); padding:0 2px; }
+  .chip-title{ color:var(--ink); word-break:break-word; user-select:text; }
 
   .chip-actions{ position:absolute; top:2px; right:2px; display:none; gap:1px; }
   .chip:hover .chip-actions{ display:flex; }
@@ -674,7 +673,8 @@
     focusDate: new Date(TODAY),
     miniMonth: new Date(TODAY.getFullYear(), TODAY.getMonth(), 1),
     quickAdd: null,       // { date, start, end, draft, category }
-    editingId: null,      // task id whose title is being edited
+    editingId: null,      // task id currently open in the edit form
+    editDraft: null,      // { title, start, end, category } live edits before save
     renamingKey: null,    // category key being renamed
     addingCategory: false,
     deleteConfirm: null   // { id, seriesId, title } awaiting one-vs-all delete choice
@@ -929,8 +929,8 @@
       if (input) input.focus();
     }
     if (state.editingId){
-      var editEl = el.grid.querySelector('.chip-title.editing');
-      if (editEl){ editEl.focus(); placeCaretAtEnd(editEl); }
+      var editInput = el.grid.querySelector('.qa-edit-title');
+      if (editInput) editInput.focus();
     }
   }
 
@@ -976,7 +976,9 @@
       var whHeight = (17-9)*60 / TIMELINE_MINUTES * 100;
       out += '<div class="workhours-block" style="top:' + whTop + '%;height:' + whHeight + '%"></div>';
     }
-    tasks.forEach(function(t){ out += renderBlock(t, lanes); });
+    tasks.forEach(function(t){
+      out += (state.editingId === t.id) ? renderEditForm(t) : renderBlock(t, lanes);
+    });
     if (state.quickAdd && state.quickAdd.date === iso){ out += renderQuickAdd(); }
     out += '</div>';
     return out;
@@ -991,19 +993,15 @@
     var count = lanes.count;
     var widthPct = 100 / count;
     var leftPct = lane * widthPct;
-    var editing = state.editingId === t.id;
-    var titleHtml = editing
-      ? '<span class="chip-title editing" contenteditable="true" data-id="' + t.id + '">' + esc(t.title) + '</span>'
-      : '<span class="chip-title" data-id="' + t.id + '">' + esc(t.title) + '</span>';
     var done = t.status === 'done';
     return (
       '<div class="chip catcolor' + (done ? ' done' : '') + '" ' +
-        'draggable="' + (editing ? 'false' : 'true') + '" data-id="' + t.id + '" ' +
+        'draggable="true" data-id="' + t.id + '" ' +
         'style="--cat-light:' + cat.light + ';--cat-dark:' + cat.dark + ';top:' + top + '%;height:' + height + '%;left:calc(' + leftPct + '% + 2px);width:calc(' + widthPct + '% - 4px)">' +
         '<button class="chip-check' + (done ? ' done' : '') + '" data-id="' + t.id + '" title="切换完成状态"><span class="tick"></span></button>' +
         '<span class="chip-body">' +
           '<span class="chip-time">' + t.start + '–' + t.end + '</span>' +
-          titleHtml +
+          '<span class="chip-title" data-id="' + t.id + '">' + esc(t.title) + '</span>' +
         '</span>' +
         '<div class="chip-actions">' +
           '<button class="chip-dup" data-id="' + t.id + '" title="复制任务"><span class="ico"></span></button>' +
@@ -1011,6 +1009,28 @@
         '</div>' +
         '<div class="resize-handle" draggable="false" data-id="' + t.id + '"></div>' +
       '</div>'
+    );
+  }
+
+  function renderEditForm(t){
+    var draft = state.editDraft;
+    var cat = draft.category;
+    var top = minutesToPercent(timeToMin(draft.start));
+    var cats = state.categories.map(function(c){
+      return '<button type="button" class="qa-cat catcolor' + (c.key === cat ? ' picked' : '') + '" ' +
+        'data-cat="' + c.key + '" style="--cat-light:' + c.light + ';--cat-dark:' + c.dark + '" title="' + esc(c.label) + '"></button>';
+    }).join('');
+    return (
+      '<form class="qa" data-role="editform" data-id="' + t.id + '" style="top:' + top + '%">' +
+        '<input type="text" class="qa-edit-title" placeholder="任务标题…" value="' + esc(draft.title) + '" autocomplete="off">' +
+        '<div class="qa-row"><span class="qa-label">开始</span><input type="time" class="qa-edit-start" value="' + draft.start + '"></div>' +
+        '<div class="qa-row"><span class="qa-label">结束</span><input type="time" class="qa-edit-end" value="' + draft.end + '"></div>' +
+        '<div class="qa-row"><div class="qa-cats">' + cats + '</div></div>' +
+        '<div class="qa-actions">' +
+          '<button type="button" class="qa-cancel" data-role="edit-cancel">取消</button>' +
+          '<button type="submit" class="qa-save">保存</button>' +
+        '</div>' +
+      '</form>'
     );
   }
 
@@ -1088,14 +1108,47 @@
     render();
     if (currentUser) sbWrite(sb.from('tasks').update({ date: t.date, start_time: t.start, end_time: t.end }).eq('id', id));
   }
-  function commitTitleEdit(id, newTitle){
+  function startEditingTask(id){
     var t = state.tasks.find(function(x){ return x.id === id; });
     if (!t) return;
-    var trimmed = newTitle.trim();
-    if (trimmed) t.title = trimmed;
-    state.editingId = null;
+    state.quickAdd = null;
+    state.editingId = id;
+    state.editDraft = { title: t.title, start: t.start, end: t.end, category: t.category };
     render();
-    if (currentUser && trimmed) sbWrite(sb.from('tasks').update({ title: trimmed }).eq('id', id));
+  }
+  function captureEditForm(){
+    if (!state.editingId || !state.editDraft) return;
+    var titleInput = el.grid.querySelector('.qa-edit-title');
+    var startInput = el.grid.querySelector('.qa-edit-start');
+    var endInput = el.grid.querySelector('.qa-edit-end');
+    if (titleInput) state.editDraft.title = titleInput.value;
+    if (startInput) state.editDraft.start = startInput.value;
+    if (endInput) state.editDraft.end = endInput.value;
+  }
+  function cancelEditingTask(){
+    state.editingId = null;
+    state.editDraft = null;
+    render();
+  }
+  function commitTaskEdit(id, values){
+    var t = state.tasks.find(function(x){ return x.id === id; });
+    if (!t) return;
+    var title = values.title.trim();
+    var start = values.start || t.start;
+    var end = values.end || t.end;
+    if (timeToMin(end) <= timeToMin(start)) end = minToTime(timeToMin(start) + 15);
+    if (title) t.title = title;
+    t.start = start;
+    t.end = end;
+    t.category = values.category || t.category;
+    state.editingId = null;
+    state.editDraft = null;
+    render();
+    if (currentUser){
+      sbWrite(sb.from('tasks').update({
+        title: t.title, start_time: t.start, end_time: t.end, category: t.category
+      }).eq('id', id));
+    }
   }
   function commitCategoryRename(key, newLabel){
     var cat = catByKey(key);
@@ -1295,6 +1348,12 @@
       render();
       return;
     }
+    if (qaCat && state.editingId){
+      captureEditForm();
+      state.editDraft.category = qaCat.dataset.cat;
+      render();
+      return;
+    }
     var wdChip = e.target.closest('.qa-wd');
     if (wdChip && state.quickAdd){
       captureQuickAddForm();
@@ -1307,15 +1366,20 @@
     }
     var cancelBtn = e.target.closest('[data-role="cancel"]');
     if (cancelBtn){ state.quickAdd = null; render(); return; }
+    var editCancelBtn = e.target.closest('[data-role="edit-cancel"]');
+    if (editCancelBtn){ cancelEditingTask(); return; }
 
     var block = e.target.closest('.chip');
     if (block) return;
+
+    var editForm = e.target.closest('[data-role="editform"]');
+    if (editForm) return;
 
     var handle = e.target.closest('.resize-handle');
     if (handle) return;
 
     var col = e.target.closest('.timeline-col');
-    if (col && !state.quickAdd){
+    if (col && !state.quickAdd && !state.editingId){
       var rect = col.getBoundingClientRect();
       var y = e.clientY - rect.top;
       var minutes = HOUR_START*60 + (y / rect.height * TIMELINE_MINUTES);
@@ -1328,8 +1392,9 @@
   });
 
   el.grid.addEventListener('dblclick', function(e){
-    var title = e.target.closest('.chip-title');
-    if (title){ state.editingId = title.dataset.id; render(); }
+    if (e.target.closest('.chip-check') || e.target.closest('.chip-actions') || e.target.closest('.resize-handle')) return;
+    var block = e.target.closest('.chip');
+    if (block) startEditingTask(block.dataset.id);
   });
 
   el.grid.addEventListener('change', function(e){
@@ -1345,20 +1410,14 @@
   });
 
   el.grid.addEventListener('keydown', function(e){
-    var editing = e.target.closest('.chip-title.editing');
-    if (editing){
-      if (e.key === 'Enter'){ e.preventDefault(); commitTitleEdit(editing.dataset.id, editing.textContent); }
-      if (e.key === 'Escape'){ e.preventDefault(); state.editingId = null; render(); }
-    }
     if (e.key === 'Escape' && e.target.closest('[data-role="quickadd"]')){
       state.quickAdd = null;
       render();
     }
+    if (e.key === 'Escape' && e.target.closest('[data-role="editform"]')){
+      cancelEditingTask();
+    }
   });
-  el.grid.addEventListener('blur', function(e){
-    var editing = e.target.closest && e.target.closest('.chip-title.editing');
-    if (editing && editing.isConnected) commitTitleEdit(editing.dataset.id, editing.textContent);
-  }, true);
 
   el.grid.addEventListener('submit', function(e){
     var form = e.target.closest('[data-role="quickadd"]');
@@ -1390,6 +1449,21 @@
     state.quickAdd = null;
     render();
     if (currentUser && created.length) sbWrite(sb.from('tasks').insert(created.map(sbTaskRow)));
+  });
+
+  el.grid.addEventListener('submit', function(e){
+    var form = e.target.closest('[data-role="editform"]');
+    if (!form) return;
+    e.preventDefault();
+    var titleInput = form.querySelector('.qa-edit-title');
+    var startInput = form.querySelector('.qa-edit-start');
+    var endInput = form.querySelector('.qa-edit-end');
+    commitTaskEdit(form.dataset.id, {
+      title: titleInput.value,
+      start: startInput.value,
+      end: endInput.value,
+      category: state.editDraft.category
+    });
   });
 
   // ---------- drag to move ----------
