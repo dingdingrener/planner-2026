@@ -1394,8 +1394,14 @@
 
     var block = e.target.closest('.chip');
     if (block){
+      // Mutate the DOM directly instead of calling render() here: a full
+      // re-render would replace this very element mid-click, which breaks
+      // the browser's native double-click detection (the dblclick that's
+      // supposed to follow never fires because its target got swapped out).
+      var prevSelected = el.grid.querySelector('.chip.selected');
+      if (prevSelected && prevSelected !== block) prevSelected.classList.remove('selected');
+      block.classList.add('selected');
       state.selectedTaskId = block.dataset.id;
-      render();
       return;
     }
 
