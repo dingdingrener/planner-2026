@@ -287,6 +287,19 @@
   .timeline-col.over{ background-color:var(--accent-soft); box-shadow:inset 0 0 0 1.5px var(--accent); }
   .workhours-block{ position:absolute; left:0; right:0; background:var(--worktint); pointer-events:none; }
 
+  .drop-indicator{
+    position:absolute; left:0; right:0; height:0;
+    border-top:2px solid var(--accent);
+    pointer-events:none; z-index:10; display:none;
+  }
+  .drop-indicator::before{
+    content: attr(data-time);
+    position:absolute; top:0; left:4px; transform:translateY(-100%);
+    background:var(--accent); color:var(--accent-contrast);
+    font-family:var(--font-mono); font-size:10px; font-variant-numeric:tabular-nums;
+    padding:1px 6px; border-radius:4px 4px 4px 0; white-space:nowrap;
+  }
+
   .chip{
     position:absolute;
     display:flex; align-items:flex-start; gap:6px;
@@ -976,6 +989,7 @@
       var whHeight = (17-9)*60 / TIMELINE_MINUTES * 100;
       out += '<div class="workhours-block" style="top:' + whTop + '%;height:' + whHeight + '%"></div>';
     }
+    out += '<div class="drop-indicator" data-time=""></div>';
     tasks.forEach(function(t){
       out += (state.editingId === t.id) ? renderEditForm(t) : renderBlock(t, lanes);
     });
@@ -1467,9 +1481,27 @@
   });
 
   // ---------- drag to move ----------
+  var dragMoveState = null; // { id, duration }
+
+  function computeSnappedStart(col, clientY, duration){
+    var rect = col.getBoundingClientRect();
+    var y = clientY - rect.top;
+    var minutes = HOUR_START*60 + (y / rect.height * TIMELINE_MINUTES);
+    minutes = Math.round(minutes / SNAP_MIN) * SNAP_MIN;
+    return clamp(minutes, HOUR_START*60, HOUR_END*60 - duration);
+  }
+  function hideDropIndicators(){
+    Array.prototype.forEach.call(el.grid.querySelectorAll('.drop-indicator'), function(ind){
+      ind.style.display = 'none';
+    });
+  }
+
   el.grid.addEventListener('dragstart', function(e){
     var chip = e.target.closest('.chip');
     if (!chip) return;
+    var t = state.tasks.find(function(x){ return x.id === chip.dataset.id; });
+    if (!t) return;
+    dragMoveState = { id: t.id, duration: timeToMin(t.end) - timeToMin(t.start) };
     e.dataTransfer.setData('text/plain', chip.dataset.id);
     e.dataTransfer.effectAllowed = 'move';
     requestAnimationFrame(function(){ chip.classList.add('dragging'); });
@@ -1477,6 +1509,8 @@
   el.grid.addEventListener('dragend', function(e){
     var chip = e.target.closest('.chip');
     if (chip) chip.classList.remove('dragging');
+    hideDropIndicators();
+    dragMoveState = null;
   });
   el.grid.addEventListener('dragover', function(e){
     var col = e.target.closest('.timeline-col');
@@ -1484,6 +1518,16 @@
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     col.classList.add('over');
+    if (dragMoveState){
+      var startMin = computeSnappedStart(col, e.clientY, dragMoveState.duration);
+      hideDropIndicators();
+      var ind = col.querySelector('.drop-indicator');
+      if (ind){
+        ind.style.top = minutesToPercent(startMin) + '%';
+        ind.style.display = 'block';
+        ind.setAttribute('data-time', minToTime(startMin) + '–' + minToTime(startMin + dragMoveState.duration));
+      }
+    }
   });
   el.grid.addEventListener('dragleave', function(e){
     var col = e.target.closest('.timeline-col');
