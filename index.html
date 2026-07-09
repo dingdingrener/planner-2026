@@ -314,6 +314,7 @@
   .chip:active{ cursor:grabbing; }
   .chip.dragging{ opacity:0.35; }
   .chip.done{ opacity:0.62; }
+  .chip.selected{ box-shadow: 0 0 0 2px var(--accent), 0 1px 3px rgba(0,0,0,0.1); }
   .chip.done .chip-title{ text-decoration:line-through; color:var(--ink-soft); }
 
   .chip-check{
@@ -690,7 +691,10 @@
     editDraft: null,      // { title, start, end, category } live edits before save
     renamingKey: null,    // category key being renamed
     addingCategory: false,
-    deleteConfirm: null   // { id, seriesId, title } awaiting one-vs-all delete choice
+    deleteConfirm: null,  // { id, seriesId, title } awaiting one-vs-all delete choice
+    selectedTaskId: null, // task id highlighted for copy (Ctrl/Cmd+C)
+    clipboardTask: null,  // { title, category, start, end } captured on copy
+    pasteTargetDate: null // date of the day most recently clicked, used by Ctrl/Cmd+V
   };
 
   function catByKey(key){
@@ -1008,9 +1012,11 @@
     var widthPct = 100 / count;
     var leftPct = lane * widthPct;
     var done = t.status === 'done';
+    var selected = state.selectedTaskId === t.id;
     return (
-      '<div class="chip catcolor' + (done ? ' done' : '') + '" ' +
+      '<div class="chip catcolor' + (done ? ' done' : '') + (selected ? ' selected' : '') + '" ' +
         'draggable="true" data-id="' + t.id + '" ' +
+        'title="点击选中后 Ctrl/Cmd+C 复制" ' +
         'style="--cat-light:' + cat.light + ';--cat-dark:' + cat.dark + ';top:' + top + '%;height:' + height + '%;left:calc(' + leftPct + '% + 2px);width:calc(' + widthPct + '% - 4px)">' +
         '<button class="chip-check' + (done ? ' done' : '') + '" data-id="' + t.id + '" title="切换完成状态"><span class="tick"></span></button>' +
         '<span class="chip-body">' +
@@ -1340,6 +1346,9 @@
 
   // ---------- event wiring: grid (tasks, quick-add) ----------
   el.grid.addEventListener('click', function(e){
+    var dateHost = e.target.closest('[data-date]');
+    if (dateHost) state.pasteTargetDate = dateHost.dataset.date;
+
     var check = e.target.closest('.chip-check');
     if (check){ toggleStatus(check.dataset.id); return; }
     var dup = e.target.closest('.chip-dup');
@@ -1384,7 +1393,11 @@
     if (editCancelBtn){ cancelEditingTask(); return; }
 
     var block = e.target.closest('.chip');
-    if (block) return;
+    if (block){
+      state.selectedTaskId = block.dataset.id;
+      render();
+      return;
+    }
 
     var editForm = e.target.closest('[data-role="editform"]');
     if (editForm) return;
@@ -1401,6 +1414,7 @@
       var startMin = clamp(minutes, HOUR_START*60, HOUR_END*60 - 60);
       var endMin = Math.min(startMin + 60, HOUR_END*60);
       state.quickAdd = { date: col.dataset.date, start: minToTime(startMin), end: minToTime(endMin), draft: '', category: firstActiveCategory() };
+      state.selectedTaskId = null;
       render();
     }
   });
@@ -1598,6 +1612,35 @@
   });
   document.addEventListener('keydown', function(e){
     if (e.key === 'Escape' && state.deleteConfirm){ state.deleteConfirm = null; render(); }
+  });
+
+  // ---------- copy / paste a task with Ctrl/Cmd+C, Ctrl/Cmd+V ----------
+  document.addEventListener('keydown', function(e){
+    var active = document.activeElement;
+    var tag = active && active.tagName;
+    var isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || (active && active.isContentEditable);
+    if (isTyping) return;
+
+    var mod = e.ctrlKey || e.metaKey;
+    if (!mod) return;
+
+    if (e.key === 'c' || e.key === 'C'){
+      if (!state.selectedTaskId) return;
+      var t = state.tasks.find(function(x){ return x.id === state.selectedTaskId; });
+      if (!t) return;
+      state.clipboardTask = { title: t.title, category: t.category, start: t.start, end: t.end };
+      e.preventDefault();
+    } else if (e.key === 'v' || e.key === 'V'){
+      if (!state.clipboardTask) return;
+      var c = state.clipboardTask;
+      var targetDate = state.pasteTargetDate || toISO(state.focusDate);
+      var pasted = mk(c.title, c.category, targetDate, c.start, c.end, 'planned');
+      state.tasks.push(pasted);
+      state.selectedTaskId = pasted.id;
+      render();
+      if (currentUser) sbWrite(sb.from('tasks').insert(sbTaskRow(pasted)));
+      e.preventDefault();
+    }
   });
 
   // ---------- auth & Supabase sync ----------
