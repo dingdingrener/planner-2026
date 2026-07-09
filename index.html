@@ -20,6 +20,7 @@
     --shadow: 0 1px 2px rgba(34,38,42,0.06), 0 4px 14px rgba(34,38,42,0.06);
     --holiday: #B3541E;
     --holiday-bg: rgba(179,84,30,0.08);
+    --star: #C9972B;
     --worktint: rgba(43,110,99,0.05);
 
     --font-display: 'Iowan Old Style','Palatino Linotype', Palatino, Georgia, serif;
@@ -43,6 +44,7 @@
       --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 6px 20px rgba(0,0,0,0.28);
       --holiday: #E0A374;
       --holiday-bg: rgba(224,163,116,0.14);
+      --star: #E8BE6E;
       --worktint: rgba(111,191,174,0.07);
     }
   }
@@ -61,6 +63,7 @@
     --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 6px 20px rgba(0,0,0,0.28);
     --holiday: #E0A374;
     --holiday-bg: rgba(224,163,116,0.14);
+    --star: #E8BE6E;
     --worktint: rgba(111,191,174,0.07);
   }
   :root[data-theme="light"]{
@@ -78,6 +81,7 @@
     --shadow: 0 1px 2px rgba(34,38,42,0.06), 0 4px 14px rgba(34,38,42,0.06);
     --holiday: #B3541E;
     --holiday-bg: rgba(179,84,30,0.08);
+    --star: #C9972B;
     --worktint: rgba(43,110,99,0.05);
   }
 
@@ -215,6 +219,7 @@
   .agenda-time{ font-family:var(--font-mono); font-size:10px; color:var(--ink-faint); flex:none; font-variant-numeric:tabular-nums; }
   .agenda-title{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .agenda-title.done{ text-decoration:line-through; color:var(--ink-soft); }
+  .agenda-star{ color:var(--star); font-size:11px; flex:none; }
   .agenda-empty{ font-size:12px; color:var(--ink-faint); font-style:italic; }
 
   .today-btn{
@@ -334,7 +339,7 @@
   .chip-time{ font-family:var(--font-mono); font-size:9.5px; color:var(--ink-faint); font-variant-numeric:tabular-nums; display:block; margin-bottom:1px; }
   .chip-title{ color:var(--ink); word-break:break-word; user-select:text; }
 
-  .chip-actions{ position:absolute; top:2px; right:2px; display:none; gap:1px; }
+  .chip-actions{ position:absolute; top:2px; right:18px; display:none; gap:1px; }
   .chip:hover .chip-actions{ display:flex; }
   .chip-dup, .chip-del{
     width:16px; height:16px; border:none; background:var(--paper-raised); color:var(--ink-soft);
@@ -347,6 +352,16 @@
     content:""; position:absolute; top:-2.5px; left:-2.5px; width:7px; height:7px;
     border:1.3px solid currentColor; background:var(--paper-raised);
   }
+
+  .chip-star{
+    position:absolute; top:2px; right:2px; z-index:2;
+    border:none; background:transparent; padding:0;
+    width:14px; height:14px; font-size:12px; line-height:1;
+    color:var(--ink-faint); opacity:0;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .chip-star.on{ color:var(--star); opacity:1; }
+  .chip:hover .chip-star{ opacity:1; }
 
   .resize-handle{ position:absolute; left:0; right:0; bottom:0; height:7px; cursor:ns-resize; touch-action:none; }
   .resize-handle::after{
@@ -643,8 +658,8 @@
       mk('读书', 'learning', '2026-07-12', '20:00', '21:00', 'planned')
     ];
   }
-  function mk(title, category, date, start, end, status){
-    return { id: uid(), title: title, category: category, date: date, start: start, end: end, status: status };
+  function mk(title, category, date, start, end, status, starred){
+    return { id: uid(), title: title, category: category, date: date, start: start, end: end, status: status, starred: !!starred };
   }
   function seedNotes(){
     return {
@@ -849,6 +864,7 @@
       return '<div class="agenda-row">' +
         '<button class="chip-check catcolor' + (done ? ' done' : '') + '" data-id="' + t.id + '" style="--cat-light:' + cat.light + ';--cat-dark:' + cat.dark + '" title="切换完成状态"><span class="tick"></span></button>' +
         '<span class="agenda-time">' + t.start + '–' + t.end + '</span>' +
+        (t.starred ? '<span class="agenda-star">★</span>' : '') +
         '<span class="agenda-title' + (done ? ' done' : '') + '">' + esc(t.title) + '</span>' +
       '</div>';
     }).join('');
@@ -1027,6 +1043,7 @@
           '<button class="chip-dup" data-id="' + t.id + '" title="复制任务"><span class="ico"></span></button>' +
           '<button class="chip-del" data-id="' + t.id + '" title="删除任务">&times;</button>' +
         '</div>' +
+        '<button class="chip-star' + (t.starred ? ' on' : '') + '" data-id="' + t.id + '" title="' + (t.starred ? '取消星标' : '加星标') + '">★</button>' +
         '<div class="resize-handle" draggable="false" data-id="' + t.id + '"></div>' +
       '</div>'
     );
@@ -1098,11 +1115,18 @@
     render();
     if (currentUser) sbWrite(sb.from('tasks').update({ status: t.status }).eq('id', id));
   }
+  function toggleStar(id){
+    var t = state.tasks.find(function(x){ return x.id === id; });
+    if (!t) return;
+    t.starred = !t.starred;
+    render();
+    if (currentUser) sbWrite(sb.from('tasks').update({ starred: t.starred }).eq('id', id));
+  }
   function duplicateTask(id){
     var t = state.tasks.find(function(x){ return x.id === id; });
     if (!t) return;
     var idx = state.tasks.indexOf(t);
-    var copy = { id: uid(), title: t.title, category: t.category, date: t.date, start: t.start, end: t.end, status: 'planned' };
+    var copy = { id: uid(), title: t.title, category: t.category, date: t.date, start: t.start, end: t.end, status: 'planned', starred: t.starred || false };
     state.tasks.splice(idx+1, 0, copy);
     render();
     if (currentUser) sbWrite(sb.from('tasks').insert(sbTaskRow(copy)));
@@ -1351,6 +1375,8 @@
 
     var check = e.target.closest('.chip-check');
     if (check){ toggleStatus(check.dataset.id); return; }
+    var star = e.target.closest('.chip-star');
+    if (star){ toggleStar(star.dataset.id); return; }
     var dup = e.target.closest('.chip-dup');
     if (dup){ duplicateTask(dup.dataset.id); return; }
     var del = e.target.closest('.chip-del');
@@ -1426,7 +1452,7 @@
   });
 
   el.grid.addEventListener('dblclick', function(e){
-    if (e.target.closest('.chip-check') || e.target.closest('.chip-actions') || e.target.closest('.resize-handle')) return;
+    if (e.target.closest('.chip-check') || e.target.closest('.chip-actions') || e.target.closest('.chip-star') || e.target.closest('.resize-handle')) return;
     var block = e.target.closest('.chip');
     if (block) startEditingTask(block.dataset.id);
   });
@@ -1634,13 +1660,13 @@
       if (!state.selectedTaskId) return;
       var t = state.tasks.find(function(x){ return x.id === state.selectedTaskId; });
       if (!t) return;
-      state.clipboardTask = { title: t.title, category: t.category, start: t.start, end: t.end };
+      state.clipboardTask = { title: t.title, category: t.category, start: t.start, end: t.end, starred: t.starred || false };
       e.preventDefault();
     } else if (e.key === 'v' || e.key === 'V'){
       if (!state.clipboardTask) return;
       var c = state.clipboardTask;
       var targetDate = state.pasteTargetDate || toISO(state.focusDate);
-      var pasted = mk(c.title, c.category, targetDate, c.start, c.end, 'planned');
+      var pasted = mk(c.title, c.category, targetDate, c.start, c.end, 'planned', c.starred);
       state.tasks.push(pasted);
       state.selectedTaskId = pasted.id;
       render();
@@ -1663,7 +1689,7 @@
     return {
       id: t.id, user_id: currentUser.id, title: t.title, category: t.category,
       date: t.date, start_time: t.start, end_time: t.end, status: t.status,
-      series_id: t.seriesId || null
+      series_id: t.seriesId || null, starred: t.starred || false
     };
   }
   function sbNoteRow(iso, text){
@@ -1706,7 +1732,7 @@
         return {
           id: r.id, title: r.title, category: r.category, date: r.date,
           start: r.start_time, end: r.end_time, status: r.status,
-          seriesId: r.series_id || undefined
+          seriesId: r.series_id || undefined, starred: !!r.starred
         };
       });
       state.notes = {};
